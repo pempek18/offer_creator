@@ -19,6 +19,73 @@ except ImportError:
     REPORTLAB_AVAILABLE = False
 
 
+def normalize_encoding(text):
+    """
+    Normalizuje kodowanie tekstu, próbując naprawić uszkodzone znaki.
+    Konwertuje tekst do UTF-8, próbując różnych kodowań jeśli potrzeba.
+    """
+    if not text or not isinstance(text, str):
+        return text
+    
+    # Jeśli tekst już jest poprawny i nie zawiera znaków zastępczych, zwróć go
+    try:
+        text.encode('utf-8')
+        # Sprawdź czy nie zawiera znaków zastępczych (kwadraty, pytajniki itp.)
+        if '\ufffd' not in text and '' not in text and '■' not in text:
+            return text
+    except UnicodeEncodeError:
+        pass
+    
+    # Jeśli tekst zawiera znaki zastępcze, spróbuj naprawić
+    # Najpierw spróbuj traktować jako Windows-1250 (typowe dla polskich systemów)
+    try:
+        # Jeśli tekst zawiera znaki zastępcze, spróbuj różnych kodowań
+        if isinstance(text, bytes):
+            # Jeśli to bytes, spróbuj zdekodować
+            for encoding in ['utf-8', 'windows-1250', 'iso-8859-2', 'cp1250']:
+                try:
+                    decoded = text.decode(encoding)
+                    if '\ufffd' not in decoded and '' not in decoded:
+                        return decoded
+                except (UnicodeDecodeError, UnicodeEncodeError):
+                    continue
+        else:
+            # Jeśli to string z uszkodzonymi znakami, spróbuj naprawić
+            # Najpierw zakoduj jako latin1 (zachowuje bajty) i zdekoduj jako windows-1250
+            try:
+                encoded = text.encode('latin1', errors='ignore')
+                for encoding in ['windows-1250', 'iso-8859-2', 'cp1250']:
+                    try:
+                        decoded = encoded.decode(encoding, errors='ignore')
+                        if '\ufffd' not in decoded and '' not in decoded and '■' not in decoded:
+                            # Sprawdź czy zawiera polskie znaki (znak że naprawa zadziałała)
+                            if any(c in decoded for c in 'ąćęłńóśźżĄĆĘŁŃÓŚŹŻ'):
+                                return decoded
+                    except (UnicodeDecodeError, UnicodeEncodeError):
+                        continue
+            except:
+                pass
+    except:
+        pass
+    
+    # Jeśli nic nie zadziałało, zwróć oryginalny tekst
+    return text
+
+
+def fix_string_encoding(text):
+    """
+    Naprawia kodowanie pojedynczego stringa.
+    """
+    if isinstance(text, dict):
+        return {k: fix_string_encoding(v) for k, v in text.items()}
+    elif isinstance(text, list):
+        return [fix_string_encoding(item) for item in text]
+    elif isinstance(text, str):
+        return normalize_encoding(text)
+    else:
+        return text
+
+
 class OfferCreatorApp:
     def __init__(self, root):
         self.root = root
@@ -186,7 +253,7 @@ class OfferCreatorApp:
         items_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
         # Treeview dla pozycji
-        columns = ("Lp", "Nazwa", "Ilość", "Cena jednostkowa", "Wartość")
+        columns = ("Lp", "Nazwa", "Ilosc", "Cena jednostkowa", "Wartosc")
         self.items_tree = ttk.Treeview(items_frame, columns=columns, show="headings", height=8)
         
         for col in columns:
@@ -212,7 +279,7 @@ class OfferCreatorApp:
         self.item_entries = {}
         item_fields = [
             ("Nazwa pozycji:", "name"),
-            ("Ilość:", "quantity"),
+            ("Ilosc:", "quantity"),
             ("Cena jednostkowa:", "unit_price")
         ]
         
@@ -266,7 +333,9 @@ class OfferCreatorApp:
     
     def save_company_data(self):
         for key, entry in self.company_entries.items():
-            self.company_data[key] = entry.get()
+            value = entry.get()
+            # Normalizuj kodowanie przed zapisaniem
+            self.company_data[key] = normalize_encoding(value)
         
         # Zapisz do pliku JSON
         try:
@@ -283,9 +352,13 @@ class OfferCreatorApp:
                 with open("company_data.json", "r", encoding="utf-8") as f:
                     self.company_data = json.load(f)
                 
+                # Napraw kodowanie danych
+                self.company_data = fix_string_encoding(self.company_data)
+                
                 for key, entry in self.company_entries.items():
                     entry.delete(0, tk.END)
-                    entry.insert(0, self.company_data.get(key, ""))
+                    value = self.company_data.get(key, "")
+                    entry.insert(0, value)
             except Exception as e:
                 messagebox.showerror("Błąd", f"Nie udało się wczytać danych: {str(e)}")
         else:
@@ -297,7 +370,9 @@ class OfferCreatorApp:
     def add_recipient(self):
         recipient = {}
         for key, entry in self.recipient_entries.items():
-            recipient[key] = entry.get()
+            value = entry.get()
+            # Normalizuj kodowanie wszystkich wartości
+            recipient[key] = normalize_encoding(value)
         
         if not recipient.get("name"):
             messagebox.showwarning("Uwaga", "Nazwa odbiorcy jest wymagana!")
@@ -322,9 +397,10 @@ class OfferCreatorApp:
         # Znajdź odbiorcę
         for i, recipient in enumerate(self.recipients):
             if recipient.get("name") == recipient_name:
-                # Zaktualizuj dane
+                # Zaktualizuj dane z normalizacją kodowania
                 for key, entry in self.recipient_entries.items():
-                    self.recipients[i][key] = entry.get()
+                    value = entry.get()
+                    self.recipients[i][key] = normalize_encoding(value)
                 
                 self.save_recipients()
                 self.refresh_recipients_list()
@@ -393,6 +469,10 @@ class OfferCreatorApp:
             try:
                 with open("recipients.json", "r", encoding="utf-8") as f:
                     self.recipients = json.load(f)
+                
+                # Napraw kodowanie danych
+                self.recipients = fix_string_encoding(self.recipients)
+                
                 self.refresh_recipients_list()
             except Exception as e:
                 messagebox.showerror("Błąd", f"Nie udało się wczytać odbiorców: {str(e)}")
@@ -416,6 +496,9 @@ class OfferCreatorApp:
             quantity = float(quantity_str.replace(",", ".")) if quantity_str else 0
             price = float(price_str.replace(",", ".")) if price_str else 0
             total = quantity * price
+            
+            # Normalizuj kodowanie nazwy
+            name = normalize_encoding(name)
             
             item = {
                 "name": name,
@@ -447,6 +530,9 @@ class OfferCreatorApp:
             quantity = float(quantity_str.replace(",", ".")) if quantity_str else 0
             price = float(price_str.replace(",", ".")) if price_str else 0
             total = quantity * price
+            
+            # Normalizuj kodowanie nazwy
+            name = normalize_encoding(name)
             
             self.offer_items[item_index] = {
                 "name": name,
@@ -596,7 +682,7 @@ class OfferCreatorApp:
                 # Pozycje oferty
                 f.write("POZYCJE OFERTY:\n")
                 f.write("-" * 80 + "\n")
-                f.write(f"{'Lp':<5} {'Nazwa':<40} {'Ilość':>10} {'Cena':>12} {'Wartość':>12}\n")
+                f.write(f"{'Lp':<5} {'Nazwa':<40} {'Ilosc':>10} {'Cena':>12} {'Wartosc':>12}\n")
                 f.write("-" * 80 + "\n")
                 
                 total = 0
@@ -869,9 +955,9 @@ class OfferCreatorApp:
             items_data = [[
                 Paragraph('Lp', header_cell_style),
                 Paragraph('Nazwa', header_cell_style),
-                Paragraph('Ilość', header_cell_style),
-                Paragraph('Cena jdn.', header_cell_style),
-                Paragraph('Wartość', header_cell_style)
+                Paragraph('Ilosc', header_cell_style),
+                Paragraph('Cena jedn.', header_cell_style),
+                Paragraph('Wartosc', header_cell_style)
             ]]
             
             total = 0
@@ -949,6 +1035,9 @@ class OfferCreatorApp:
         try:
             with open(filename, "r", encoding="utf-8") as f:
                 offer_data = json.load(f)
+            
+            # Napraw kodowanie danych
+            offer_data = fix_string_encoding(offer_data)
             
             # Sprawdź czy plik ma poprawną strukturę
             if not isinstance(offer_data, dict):
