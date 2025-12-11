@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import os
 
@@ -644,7 +644,10 @@ class OfferCreatorApp:
                 f.write("=" * 80 + "\n\n")
                 
                 # Data
-                f.write(f"Data: {datetime.now().strftime('%d.%m.%Y')}\n\n")
+                offer_date = datetime.now()
+                valid_until = offer_date + timedelta(days=30)  # +1 miesiąc (około 30 dni)
+                f.write(f"Data: {offer_date.strftime('%d.%m.%Y')}\n")
+                f.write(f"Oferta ważna do: {valid_until.strftime('%d.%m.%Y')}\n\n")
                 
                 # Dane firmy
                 f.write("SPRZEDAWCA:\n")
@@ -682,7 +685,7 @@ class OfferCreatorApp:
                 # Pozycje oferty
                 f.write("POZYCJE OFERTY:\n")
                 f.write("-" * 80 + "\n")
-                f.write(f"{'Lp':<5} {'Nazwa':<40} {'Ilosc':>10} {'Cena':>12} {'Wartosc':>12}\n")
+                f.write(f"{'Lp':<5} {'Nazwa':<40} {'Ilość':>10} {'Cena':>12} {'Wartość':>12}\n")
                 f.write("-" * 80 + "\n")
                 
                 total = 0
@@ -852,14 +855,17 @@ class OfferCreatorApp:
             story.append(Spacer(1, 10*mm))
             
             # Data
-            date_text = f"Data: {datetime.now().strftime('%d.%m.%Y')}"
+            offer_date = datetime.now()
+            valid_until = offer_date + timedelta(days=30)  # +1 miesiąc (około 30 dni)
+            date_text = f"Data: {offer_date.strftime('%d.%m.%Y')}"
+            valid_until_text = f"Oferta wazna do: {valid_until.strftime('%d.%m.%Y')}"
             story.append(Paragraph(date_text, normal_style))
+            story.append(Paragraph(valid_until_text, normal_style))
             story.append(Spacer(1, 5*mm))
             
-            # Dane sprzedawcy
-            story.append(Paragraph("<b>SPRZEDAWCA:</b>", heading_style))
-            
-            company_data_rows = []
+            # Przygotuj dane sprzedawcy jako tekst
+            company_text_parts = []
+            company_text_parts.append(Paragraph("<b>SPRZEDAWCA:</b>", heading_style))
             for key, label in [
                 ("name", "Nazwa:"),
                 ("address", "Adres:"),
@@ -872,26 +878,11 @@ class OfferCreatorApp:
             ]:
                 value = self.company_data.get(key, "")
                 if value:
-                    company_data_rows.append([label, value])
+                    company_text_parts.append(Paragraph(f"<b>{label}</b> {value}", normal_style))
             
-            if company_data_rows:
-                company_table = Table(company_data_rows, colWidths=[40*mm, 120*mm])
-                company_table.setStyle(TableStyle([
-                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                    ('FONTNAME', (0, 0), (0, -1), font_bold),
-                    ('FONTNAME', (1, 0), (1, -1), font_name),
-                    ('FONTSIZE', (0, 0), (-1, -1), 10),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                    ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ]))
-                story.append(company_table)
-            
-            story.append(Spacer(1, 5*mm))
-            
-            # Dane odbiorcy
-            story.append(Paragraph("<b>ODBIORCA:</b>", heading_style))
-            
-            recipient_data_rows = []
+            # Przygotuj dane odbiorcy jako tekst
+            recipient_text_parts = []
+            recipient_text_parts.append(Paragraph("<b>ODBIORCA:</b>", heading_style))
             for key, label in [
                 ("name", "Nazwa:"),
                 ("address", "Adres:"),
@@ -903,19 +894,35 @@ class OfferCreatorApp:
             ]:
                 value = recipient.get(key, "")
                 if value:
-                    recipient_data_rows.append([label, value])
+                    recipient_text_parts.append(Paragraph(f"<b>{label}</b> {value}", normal_style))
             
-            if recipient_data_rows:
-                recipient_table = Table(recipient_data_rows, colWidths=[40*mm, 120*mm])
-                recipient_table.setStyle(TableStyle([
-                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                    ('FONTNAME', (0, 0), (0, -1), font_bold),
-                    ('FONTNAME', (1, 0), (1, -1), font_name),
-                    ('FONTSIZE', (0, 0), (-1, -1), 10),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                    ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ]))
-                story.append(recipient_table)
+            # Utwórz tabelę z dwiema kolumnami (sprzedawca po lewej, odbiorca po prawej)
+            # Oblicz szerokość kolumn
+            page_width = A4[0] - 40*mm  # Szerokość strony minus marginesy
+            col_width = (page_width - 10*mm) / 2  # Połowa szerokości minus odstęp między kolumnami
+            
+            # Znajdź maksymalną liczbę wierszy
+            max_rows = max(len(company_text_parts), len(recipient_text_parts))
+            
+            # Utwórz wiersze tabeli
+            side_by_side_data = []
+            for i in range(max_rows):
+                left_cell = company_text_parts[i] if i < len(company_text_parts) else Paragraph("", normal_style)
+                right_cell = recipient_text_parts[i] if i < len(recipient_text_parts) else Paragraph("", normal_style)
+                side_by_side_data.append([left_cell, right_cell])
+            
+            side_by_side_table = Table(side_by_side_data, colWidths=[col_width, col_width])
+            side_by_side_table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (0, -1), 0),
+                ('RIGHTPADDING', (0, 0), (0, -1), 5*mm),
+                ('LEFTPADDING', (1, 0), (1, -1), 5*mm),
+                ('RIGHTPADDING', (1, 0), (1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 2),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+            ]))
+            story.append(side_by_side_table)
             
             story.append(Spacer(1, 8*mm))
             
