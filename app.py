@@ -86,6 +86,62 @@ def fix_string_encoding(text):
         return text
 
 
+def register_pdf_polish_fonts():
+    """
+    Rejestruje font TTF z pełną obsługą polskich znaków (ąćęłńóśźż).
+    Zwraca (font_name, font_bold) do ParagraphStyle.
+    """
+    if not REPORTLAB_AVAILABLE:
+        return 'Helvetica', 'Helvetica-Bold'
+
+    def try_pair(regular_path, bold_path, name, bold_name):
+        if not os.path.exists(regular_path):
+            return None
+        try:
+            pdfmetrics.registerFont(TTFont(name, regular_path))
+            if bold_path and os.path.exists(bold_path):
+                pdfmetrics.registerFont(TTFont(bold_name, bold_path))
+                return name, bold_name
+            return name, name
+        except Exception:
+            return None
+
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    font_candidates = [
+        (os.path.join(app_dir, 'fonts', 'DejaVuSans.ttf'),
+         os.path.join(app_dir, 'fonts', 'DejaVuSans-Bold.ttf'),
+         'OfferDejaVu', 'OfferDejaVu-Bold'),
+        ('C:/Windows/Fonts/arial.ttf', 'C:/Windows/Fonts/ARIALBD.TTF',
+         'OfferArial', 'OfferArial-Bold'),
+        ('C:/Windows/Fonts/calibri.ttf', 'C:/Windows/Fonts/calibrib.ttf',
+         'OfferCalibri', 'OfferCalibri-Bold'),
+        ('C:/Windows/Fonts/segoeui.ttf', 'C:/Windows/Fonts/segoeuib.ttf',
+         'OfferSegoe', 'OfferSegoe-Bold'),
+        ('C:/Windows/Fonts/DejaVuSans.ttf', 'C:/Windows/Fonts/DejaVuSans-Bold.ttf',
+         'OfferDejaVu', 'OfferDejaVu-Bold'),
+        ('C:/Windows/Fonts/ARIALUNI.TTF', None, 'OfferArialUnicode', 'OfferArialUnicode'),
+        ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+         '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+         'OfferDejaVu', 'OfferDejaVu-Bold'),
+        ('/usr/share/fonts/TTF/DejaVuSans.ttf',
+         '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf',
+         'OfferDejaVu', 'OfferDejaVu-Bold'),
+        ('/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+         '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+         'OfferLiberation', 'OfferLiberation-Bold'),
+        ('/usr/share/fonts/TTF/LiberationSans-Regular.ttf',
+         '/usr/share/fonts/TTF/LiberationSans-Bold.ttf',
+         'OfferLiberation', 'OfferLiberation-Bold'),
+    ]
+
+    for regular, bold, name, bold_name in font_candidates:
+        result = try_pair(regular, bold, name, bold_name)
+        if result:
+            return result
+
+    return 'Helvetica', 'Helvetica-Bold'
+
+
 class OfferCreatorApp:
     def __init__(self, root):
         self.root = root
@@ -112,6 +168,7 @@ class OfferCreatorApp:
         
         self.setup_ui()
         self.load_company_data()
+        self.load_recipients()
     
     def setup_ui(self):
         # Główny kontener z zakładkami
@@ -246,7 +303,6 @@ class OfferCreatorApp:
         self.recipient_combo = ttk.Combobox(recipient_frame, textvariable=self.selected_recipient, 
                                            width=50, state="readonly")
         self.recipient_combo.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        self.recipient_combo.bind("<<ComboboxSelected>>", self.update_recipient_combo)
         
         # Pozycje oferty
         items_frame = ttk.LabelFrame(parent, text="Pozycje Oferty", padding=10)
@@ -382,7 +438,6 @@ class OfferCreatorApp:
         self.save_recipients()
         self.refresh_recipients_list()
         self.clear_recipient_form()
-        self.update_recipient_combo()
         messagebox.showinfo("Sukces", "Odbiorca został dodany!")
     
     def edit_recipient(self):
@@ -405,7 +460,6 @@ class OfferCreatorApp:
                 self.save_recipients()
                 self.refresh_recipients_list()
                 self.clear_recipient_form()
-                self.update_recipient_combo()
                 messagebox.showinfo("Sukces", "Odbiorca został zaktualizowany!")
                 return
     
@@ -423,7 +477,6 @@ class OfferCreatorApp:
             self.save_recipients()
             self.refresh_recipients_list()
             self.clear_recipient_form()
-            self.update_recipient_combo()
     
     def clear_recipient_form(self):
         for entry in self.recipient_entries.values():
@@ -456,6 +509,7 @@ class OfferCreatorApp:
                 recipient.get("city", ""),
                 recipient.get("nip", "")
             ))
+        self.update_recipient_combo()
     
     def save_recipients(self):
         try:
@@ -477,11 +531,18 @@ class OfferCreatorApp:
             except Exception as e:
                 messagebox.showerror("Błąd", f"Nie udało się wczytać odbiorców: {str(e)}")
     
-    def update_recipient_combo(self, event=None):
-        values = [r.get("name", "") for r in self.recipients]
+    def update_recipient_combo(self):
+        if not hasattr(self, 'recipient_combo'):
+            return
+        values = [r.get("name", "") for r in self.recipients if r.get("name")]
         self.recipient_combo['values'] = values
-        if values and not self.selected_recipient.get():
-            self.selected_recipient.set(values[0] if values else "")
+        current = self.selected_recipient.get()
+        if current in values:
+            return
+        if values:
+            self.selected_recipient.set(values[0])
+        else:
+            self.selected_recipient.set("")
     
     def add_item(self):
         name = self.item_entries["name"].get()
@@ -729,87 +790,12 @@ class OfferCreatorApp:
             return
         
         try:
-            # Rejestruj fonty obsługujące polskie znaki
-            # Próbuj użyć fontów DejaVu, jeśli są dostępne
-            font_name = 'Helvetica'  # Domyślny font
-            font_bold = 'Helvetica-Bold'
-            
-            # Próbuj zarejestrować DejaVu Sans (obsługuje polskie znaki)
-            try:
-                # Sprawdź dostępność fontów DejaVu w typowych lokalizacjach
-                dejavu_paths = [
-                    'C:/Windows/Fonts/DejaVuSans.ttf',
-                    'C:/Windows/Fonts/dejavu/DejaVuSans.ttf',
-                    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-                    '/usr/share/fonts/TTF/DejaVuSans.ttf',
-                ]
-                
-                # Sprawdź również fonty Arial Unicode MS (Windows) lub Liberation Sans (Linux)
-                arial_unicode_paths = [
-                    'C:/Windows/Fonts/ARIALUNI.TTF',
-                    'C:/Windows/Fonts/arialuni.ttf',
-                ]
-                
-                liberation_paths = [
-                    '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-                    '/usr/share/fonts/TTF/LiberationSans-Regular.ttf',
-                ]
-                
-                dejavu_found = False
-                
-                # Najpierw próbuj DejaVu
-                for path in dejavu_paths:
-                    if os.path.exists(path):
-                        try:
-                            pdfmetrics.registerFont(TTFont('DejaVuSans', path))
-                            bold_path = path.replace('DejaVuSans.ttf', 'DejaVuSans-Bold.ttf')
-                            if os.path.exists(bold_path):
-                                pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', bold_path))
-                            font_name = 'DejaVuSans'
-                            font_bold = 'DejaVuSans-Bold'
-                            dejavu_found = True
-                            break
-                        except Exception as e:
-                            continue
-                
-                # Jeśli DejaVu nie znaleziono, próbuj Arial Unicode MS
-                if not dejavu_found:
-                    for path in arial_unicode_paths:
-                        if os.path.exists(path):
-                            try:
-                                pdfmetrics.registerFont(TTFont('ArialUnicode', path))
-                                font_name = 'ArialUnicode'
-                                font_bold = 'ArialUnicode'  # Użyj tego samego fontu dla bold
-                                dejavu_found = True
-                                break
-                            except Exception as e:
-                                continue
-                
-                # Jeśli nadal nie znaleziono, próbuj Liberation Sans
-                if not dejavu_found:
-                    for path in liberation_paths:
-                        if os.path.exists(path):
-                            try:
-                                pdfmetrics.registerFont(TTFont('LiberationSans', path))
-                                bold_path = path.replace('LiberationSans-Regular.ttf', 'LiberationSans-Bold.ttf')
-                                if os.path.exists(bold_path):
-                                    pdfmetrics.registerFont(TTFont('LiberationSans-Bold', bold_path))
-                                font_name = 'LiberationSans'
-                                font_bold = 'LiberationSans-Bold'
-                                dejavu_found = True
-                                break
-                            except Exception as e:
-                                continue
-                
-                # Jeśli żaden font Unicode nie został znaleziony, użyj domyślnych
-                # Helvetica w reportlab ma ograniczone wsparcie dla Unicode
-                if not dejavu_found:
-                    font_name = 'Helvetica'
-                    font_bold = 'Helvetica-Bold'
-            except Exception as e:
-                # W razie problemów, użyj domyślnych fontów
-                font_name = 'Helvetica'
-                font_bold = 'Helvetica-Bold'
+            font_name, font_bold = register_pdf_polish_fonts()
+            if font_name == 'Helvetica':
+                messagebox.showwarning(
+                    "Uwaga",
+                    "Nie znaleziono fontu z polskimi znakami (Arial/Calibri).\n"
+                    "Znaki ą, ć, ę, ł, ń, ó, ś, ź, ż mogą wyświetlać się niepoprawnie.")
             
             # Utwórz dokument PDF
             doc = SimpleDocTemplate(filename, pagesize=A4,
@@ -858,7 +844,7 @@ class OfferCreatorApp:
             offer_date = datetime.now()
             valid_until = offer_date + timedelta(days=30)  # +1 miesiąc (około 30 dni)
             date_text = f"Data: {offer_date.strftime('%d.%m.%Y')}"
-            valid_until_text = f"Oferta wazna do: {valid_until.strftime('%d.%m.%Y')}"
+            valid_until_text = f"Oferta ważna do: {valid_until.strftime('%d.%m.%Y')}"
             story.append(Paragraph(date_text, normal_style))
             story.append(Paragraph(valid_until_text, normal_style))
             story.append(Spacer(1, 5*mm))
@@ -962,9 +948,9 @@ class OfferCreatorApp:
             items_data = [[
                 Paragraph('Lp', header_cell_style),
                 Paragraph('Nazwa', header_cell_style),
-                Paragraph('Ilosc', header_cell_style),
+                Paragraph('Ilość', header_cell_style),
                 Paragraph('Cena jedn.', header_cell_style),
-                Paragraph('Wartosc', header_cell_style)
+                Paragraph('Wartość', header_cell_style)
             ]]
             
             total = 0
@@ -1166,11 +1152,7 @@ class OfferCreatorApp:
 
 def main():
     root = tk.Tk()
-    app = OfferCreatorApp(root)
-    
-    # Wczytaj odbiorców przy starcie
-    app.load_recipients()
-    
+    OfferCreatorApp(root)
     root.mainloop()
 
 
