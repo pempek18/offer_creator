@@ -1,0 +1,76 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-windows:
+    name: Windows (.exe)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build executable
+        run: pyinstaller --noconfirm --clean offer_creator.spec
+
+      - name: Package ZIP
+        run: |
+          Compress-Archive -Path dist\OfferCreator.exe -DestinationPath dist\OfferCreator-Windows.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OfferCreator-Windows
+          path: dist/OfferCreator-Windows.zip
+          if-no-files-found: error
+
+  build-macos:
+    name: macOS (.app)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build application
+        run: pyinstaller --noconfirm --clean offer_creator.spec
+
+      - name: Package ZIP
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent dist/OfferCreator.app dist/OfferCreator-macOS.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OfferCreator-macOS
+          path: dist/OfferCreator-macOS.zip
+          if-no-files-found: error
