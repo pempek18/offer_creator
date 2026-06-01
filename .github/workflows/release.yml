@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Windows (.exe)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build executable
+        run: pyinstaller --noconfirm --clean offer_creator.spec
+
+      - name: Package ZIP
+        run: |
+          Compress-Archive -Path dist\OfferCreator.exe -DestinationPath dist\OfferCreator-Windows.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/OfferCreator-Windows.zip
+          if-no-files-found: error
+
+  build-macos:
+    name: macOS (.app)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build application
+        run: pyinstaller --noconfirm --clean offer_creator.spec
+
+      - name: Package ZIP
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent dist/OfferCreator.app dist/OfferCreator-macOS.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/OfferCreator-macOS.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Offer Creator ${{ github.ref_name }}
+          draft: false
+          generate_release_notes: true
+          files: |
+            artifacts/OfferCreator-Windows.zip
+            artifacts/OfferCreator-macOS.zip
+          body: |
+            ## Instalacja
+
+            ### Windows
+            1. Pobierz `OfferCreator-Windows.zip`
+            2. Rozpakuj i uruchom `OfferCreator.exe`
+
+            ### macOS
+            1. Pobierz `OfferCreator-macOS.zip`
+            2. Rozpakuj `OfferCreator.app` i uruchom (przy pierwszym uruchomieniu: PPM → **Otwórz**, jeśli system blokuje niepodpisaną aplikację)
+
+            Aplikacja zapisuje `company_data.json` i `recipients.json` w katalogu roboczym (tam, skąd została uruchomiona).

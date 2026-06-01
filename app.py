@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox, filedialog
 from datetime import datetime, timedelta
 import json
 import os
+from xml.sax.saxutils import escape
 
 try:
     from reportlab.lib.pagesizes import A4
@@ -309,7 +310,7 @@ class OfferCreatorApp:
         items_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
         # Treeview dla pozycji
-        columns = ("Lp", "Nazwa", "Ilosc", "Cena jednostkowa", "Wartosc")
+        columns = ("Lp", "Nazwa", "Ilosc", "Cena netto", "Wartosc netto")
         self.items_tree = ttk.Treeview(items_frame, columns=columns, show="headings", height=8)
         
         for col in columns:
@@ -336,7 +337,7 @@ class OfferCreatorApp:
         item_fields = [
             ("Nazwa pozycji:", "name"),
             ("Ilosc:", "quantity"),
-            ("Cena jednostkowa:", "unit_price")
+            ("Cena netto:", "unit_price")
         ]
         
         for label, key in item_fields:
@@ -365,9 +366,31 @@ class OfferCreatorApp:
         total_frame = ttk.Frame(parent)
         total_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        self.total_label = ttk.Label(total_frame, text="Suma: 0.00 PLN", 
+        self.total_label = ttk.Label(total_frame, text="Suma netto: 0.00 PLN",
                                     font=("Arial", 12, "bold"))
         self.total_label.pack(side=tk.RIGHT)
+        
+        extra_frame = ttk.LabelFrame(parent, text="Dodatkowe informacje", padding=10)
+        extra_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        deadline_row = ttk.Frame(extra_frame)
+        deadline_row.pack(fill=tk.X, pady=3)
+        ttk.Label(deadline_row, text="Termin realizacji:", width=18).pack(side=tk.LEFT)
+        self.completion_deadline_entry = ttk.Entry(deadline_row, width=50)
+        self.completion_deadline_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        notes_frame = ttk.LabelFrame(parent, text="Uwagi", padding=10)
+        notes_frame.pack(fill=tk.BOTH, padx=20, pady=10)
+        
+        notes_container = ttk.Frame(notes_frame)
+        notes_container.pack(fill=tk.BOTH, expand=True)
+        
+        self.notes_text = tk.Text(notes_container, height=4, wrap=tk.WORD)
+        notes_scroll = ttk.Scrollbar(notes_container, orient=tk.VERTICAL,
+                                     command=self.notes_text.yview)
+        self.notes_text.configure(yscrollcommand=notes_scroll.set)
+        self.notes_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        notes_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         
         # Przyciski oferty
         offer_button_frame = ttk.Frame(parent)
@@ -659,9 +682,11 @@ class OfferCreatorApp:
                 f"{item['total']:.2f} PLN"
             ))
     
+    def get_total_net(self):
+        return sum(item["total"] for item in self.offer_items)
+    
     def update_total(self):
-        total = sum(item["total"] for item in self.offer_items)
-        self.total_label.config(text=f"Suma: {total:.2f} PLN")
+        self.total_label.config(text=f"Suma netto: {self.get_total_net():.2f} PLN")
     
     def clear_offer(self):
         self.offer_items = []
@@ -669,6 +694,14 @@ class OfferCreatorApp:
         self.clear_item_form()
         self.update_total()
         self.selected_recipient.set("")
+        self.completion_deadline_entry.delete(0, tk.END)
+        self.notes_text.delete("1.0", tk.END)
+    
+    def get_completion_deadline(self):
+        return normalize_encoding(self.completion_deadline_entry.get().strip())
+    
+    def get_offer_notes(self):
+        return normalize_encoding(self.notes_text.get("1.0", tk.END).strip())
     
     def get_selected_recipient_data(self):
         recipient_name = self.selected_recipient.get()
@@ -708,7 +741,11 @@ class OfferCreatorApp:
                 offer_date = datetime.now()
                 valid_until = offer_date + timedelta(days=30)  # +1 miesiąc (około 30 dni)
                 f.write(f"Data: {offer_date.strftime('%d.%m.%Y')}\n")
-                f.write(f"Oferta ważna do: {valid_until.strftime('%d.%m.%Y')}\n\n")
+                f.write(f"Oferta ważna do: {valid_until.strftime('%d.%m.%Y')}\n")
+                completion_deadline = self.get_completion_deadline()
+                if completion_deadline:
+                    f.write(f"Termin realizacji: {completion_deadline}\n")
+                f.write("\n")
                 
                 # Dane firmy
                 f.write("SPRZEDAWCA:\n")
@@ -746,17 +783,24 @@ class OfferCreatorApp:
                 # Pozycje oferty
                 f.write("POZYCJE OFERTY:\n")
                 f.write("-" * 80 + "\n")
-                f.write(f"{'Lp':<5} {'Nazwa':<40} {'Ilość':>10} {'Cena':>12} {'Wartość':>12}\n")
+                f.write(f"{'Lp':<5} {'Nazwa':<40} {'Ilość':>10} {'Cena netto':>12} {'Wartość netto':>14}\n")
                 f.write("-" * 80 + "\n")
                 
-                total = 0
+                total_net = self.get_total_net()
                 for i, item in enumerate(self.offer_items, 1):
                     f.write(f"{i:<5} {item['name']:<40} {item['quantity']:>10.2f} "
-                           f"{item['unit_price']:>12.2f} PLN {item['total']:>12.2f} PLN\n")
-                    total += item['total']
+                           f"{item['unit_price']:>12.2f} {item['total']:>14.2f}\n")
                 
                 f.write("-" * 80 + "\n")
-                f.write(f"{'SUMA:':<57} {total:>12.2f} PLN\n")
+                f.write(f"{'SUMA NETTO:':<55} {total_net:>14.2f} PLN\n")
+                
+                notes = self.get_offer_notes()
+                if notes:
+                    f.write("\n")
+                    f.write("UWAGI:\n")
+                    f.write("-" * 80 + "\n")
+                    f.write(notes + "\n")
+                
                 f.write("=" * 80 + "\n")
             
             messagebox.showinfo("Sukces", f"Oferta została zapisana do pliku:\n{filename}")
@@ -847,6 +891,10 @@ class OfferCreatorApp:
             valid_until_text = f"Oferta ważna do: {valid_until.strftime('%d.%m.%Y')}"
             story.append(Paragraph(date_text, normal_style))
             story.append(Paragraph(valid_until_text, normal_style))
+            completion_deadline = self.get_completion_deadline()
+            if completion_deadline:
+                story.append(Paragraph(
+                    f"Termin realizacji: {escape(completion_deadline)}", normal_style))
             story.append(Spacer(1, 5*mm))
             
             # Przygotuj dane sprzedawcy jako tekst
@@ -949,11 +997,11 @@ class OfferCreatorApp:
                 Paragraph('Lp', header_cell_style),
                 Paragraph('Nazwa', header_cell_style),
                 Paragraph('Ilość', header_cell_style),
-                Paragraph('Cena jedn.', header_cell_style),
-                Paragraph('Wartość', header_cell_style)
+                Paragraph('Cena netto', header_cell_style),
+                Paragraph('Wartość netto', header_cell_style)
             ]]
             
-            total = 0
+            total_net = self.get_total_net()
             for i, item in enumerate(self.offer_items, 1):
                 # Użyj Paragraph dla nazwy (może zawierać polskie znaki)
                 # Dla pozostałych pól też użyj Paragraph dla spójności
@@ -964,15 +1012,14 @@ class OfferCreatorApp:
                     Paragraph(f"{item['unit_price']:.2f} PLN", cell_style),
                     Paragraph(f"{item['total']:.2f} PLN", cell_style)
                 ])
-                total += item['total']
             
-            # Wiersz sumy
+            # Wiersz sumy netto
             items_data.append([
                 Paragraph('', cell_style),
                 Paragraph('', cell_style),
                 Paragraph('', cell_style),
-                Paragraph('<b>SUMA:</b>', cell_style_bold),
-                Paragraph(f'<b>{total:.2f} PLN</b>', cell_style_bold)
+                Paragraph('<b>SUMA NETTO:</b>', cell_style_bold),
+                Paragraph(f'<b>{total_net:.2f} PLN</b>', cell_style_bold)
             ])
             
             items_table = Table(items_data, colWidths=[15*mm, 80*mm, 25*mm, 30*mm, 30*mm])
@@ -1007,6 +1054,13 @@ class OfferCreatorApp:
             ]))
             
             story.append(items_table)
+            
+            notes = self.get_offer_notes()
+            if notes:
+                story.append(Spacer(1, 6*mm))
+                story.append(Paragraph("<b>UWAGI:</b>", heading_style))
+                notes_html = escape(notes).replace("\n", "<br/>")
+                story.append(Paragraph(notes_html, normal_style))
             
             # Generuj PDF
             doc.build(story)
@@ -1100,6 +1154,14 @@ class OfferCreatorApp:
             self.update_total()
             self.clear_item_form()
             
+            self.completion_deadline_entry.delete(0, tk.END)
+            if offer_data.get("completion_deadline"):
+                self.completion_deadline_entry.insert(0, offer_data["completion_deadline"])
+            
+            self.notes_text.delete("1.0", tk.END)
+            if offer_data.get("notes"):
+                self.notes_text.insert("1.0", offer_data["notes"])
+            
             # Wyświetl informację o dacie oferty jeśli jest dostępna
             date_info = ""
             if "date" in offer_data:
@@ -1139,7 +1201,10 @@ class OfferCreatorApp:
             "company": self.company_data,
             "recipient": recipient,
             "items": self.offer_items,
-            "total": sum(item["total"] for item in self.offer_items)
+            "total": self.get_total_net(),
+            "total_net": self.get_total_net(),
+            "completion_deadline": self.get_completion_deadline(),
+            "notes": self.get_offer_notes()
         }
         
         try:
